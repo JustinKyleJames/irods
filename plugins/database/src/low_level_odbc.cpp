@@ -628,6 +628,9 @@ cllExecSqlWithResult( icatSessionStruct *icss, int *stmtNum, const char *sql ) {
         return -1;
     }
 
+    // Issue 3862:  Set stmtNum to -1 and in cllFreeStatement if the stmtNum is negative do nothing
+    *stmtNum = -1;
+
     int statementNumber = -1;
     for ( int i = 0; i < MAX_NUM_OF_CONCURRENT_STMTS && statementNumber < 0; i++ ) {
         if ( icss->stmtPtr[i] == 0 ) {
@@ -642,6 +645,7 @@ cllExecSqlWithResult( icatSessionStruct *icss, int *stmtNum, const char *sql ) {
 
     icatStmtStrct * myStatement = ( icatStmtStrct * )malloc( sizeof( icatStmtStrct ) );
     icss->stmtPtr[statementNumber] = myStatement;
+    *stmtNum = statementNumber;
 
     myStatement->stmtPtr = hstmt;
 
@@ -745,7 +749,6 @@ cllExecSqlWithResult( icatSessionStruct *icss, int *stmtNum, const char *sql ) {
 
     }
 
-    *stmtNum = statementNumber;
     return 0;
 }
 
@@ -787,6 +790,9 @@ cllExecSqlWithResultBV(
         return -1;
     }
 
+    // Issue 3862:  Set stmtNum to -1 and in cllFreeStatement if the stmtNum is negative do nothing
+    *stmtNum = -1;
+
     int statementNumber = -1;
     for ( int i = 0; i < MAX_NUM_OF_CONCURRENT_STMTS && statementNumber < 0; i++ ) {
         if ( icss->stmtPtr[i] == 0 ) {
@@ -801,6 +807,8 @@ cllExecSqlWithResultBV(
 
     icatStmtStrct * myStatement = ( icatStmtStrct * )malloc( sizeof( icatStmtStrct ) );
     icss->stmtPtr[statementNumber] = myStatement;
+
+    *stmtNum = statementNumber;
 
     myStatement->stmtPtr = hstmt;
 
@@ -915,7 +923,7 @@ cllExecSqlWithResultBV(
         strncpy( myStatement->resultColName[i], ( char * )colName, columnLength[i] );
 
     }
-    *stmtNum = statementNumber;
+
     return 0;
 }
 
@@ -988,10 +996,20 @@ cllCurrentValueString( const char *itemName, char *outString, int maxSize ) {
    corresponding resultValue array.
 */
 int
-cllFreeStatement( icatSessionStruct *icss, int statementNumber ) {
+cllFreeStatement( icatSessionStruct *icss, int& statementNumber ) {
+
+    // Issue 3862 - Statement number is set to negative until it is 
+    // created.  When the statement is freed it is again set to negative.
+    // Do not free when statementNumber is negative.  If this is called twice 
+    // by a client, after the first call the statementNumber will be negative
+    // and nothing will be done.
+    if (statementNumber < 0) {
+        return 0;
+    }
 
     icatStmtStrct * myStatement = icss->stmtPtr[statementNumber];
     if ( myStatement == NULL ) { /* already freed */
+        statementNumber = -1;
         return 0;
     }
 
@@ -1005,6 +1023,7 @@ cllFreeStatement( icatSessionStruct *icss, int statementNumber ) {
     free( myStatement );
 
     icss->stmtPtr[statementNumber] = NULL; /* indicate that the statement is free */
+    statementNumber = -1;
 
     return 0;
 }
