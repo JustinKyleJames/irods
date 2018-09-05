@@ -385,7 +385,7 @@ int cmlGetFirstRowFromSql( const char *sql,
 
     if ( i != 0 ) {
         cllFreeStatement( icss, *statement );
-        *statement = 0;
+        *statement = -1;
         if ( i <= CAT_ENV_ERR ) {
             return ( i );   /* already an iRODS error code */
         }
@@ -398,12 +398,12 @@ int cmlGetFirstRowFromSql( const char *sql,
             i = cllGetRow( icss, *statement );
             if ( i != 0 )  {
                 cllFreeStatement( icss, *statement );
-                *statement = 0;
+                *statement = -1;
                 return CAT_GET_ROW_ERR;
             }
             if ( icss->stmtPtr[*statement]->numOfCols == 0 ) {
                 i = cllFreeStatement( icss, *statement );
-                *statement = 0;
+                *statement = -1;
                 return CAT_NO_ROWS_FOUND;
             }
         }
@@ -413,12 +413,12 @@ int cmlGetFirstRowFromSql( const char *sql,
     i = cllGetRow( icss, *statement );
     if ( i != 0 )  {
         cllFreeStatement( icss, *statement );
-        *statement = 0;
+        *statement = -1;
         return CAT_GET_ROW_ERR;
     }
     if ( icss->stmtPtr[*statement]->numOfCols == 0 ) {
         i = cllFreeStatement( icss, *statement );
-        *statement = 0;
+        *statement = -1;
         return CAT_NO_ROWS_FOUND;
     }
 
@@ -433,7 +433,7 @@ int cmlGetFirstRowFromSqlBV( const char *sql,
                              icatSessionStruct *icss ) {
     if ( int status = cllExecSqlWithResultBV( icss, statement, sql, bindVars ) ) {
         cllFreeStatement( icss, *statement );
-        *statement = 0;
+        *statement = -1;
         if ( status <= CAT_ENV_ERR ) {
             return status;    /* already an iRODS error code */
         }
@@ -441,12 +441,12 @@ int cmlGetFirstRowFromSqlBV( const char *sql,
     }
     if ( cllGetRow( icss, *statement ) ) {
         cllFreeStatement( icss, *statement );
-        *statement = 0;
+        *statement = -1;
         return CAT_GET_ROW_ERR;
     }
     if ( icss->stmtPtr[*statement]->numOfCols == 0 ) {
         cllFreeStatement( icss, *statement );
-        *statement = 0;
+        *statement = -1;
         return CAT_NO_ROWS_FOUND;
     }
     return 0;
