@@ -520,6 +520,8 @@ rsyncDataToDataUtil( rcComm_t *conn, rodsPath_t *srcPath,
     int syncFlag = 0;
     int cpFlag = 0;
 
+    addKeyVal( &dataObjCopyInp->destDataObjInp.condInput, DATA_SIZE_KW, std::to_string(srcPath->size).c_str() );
+
     if ( srcPath == NULL || targPath == NULL ) {
         rodsLog( LOG_ERROR,
                  "rsyncDataToDataUtil: NULL srcPath or targPath input" );
