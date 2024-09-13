@@ -17,8 +17,7 @@
 #include <algorithm>
 #include <string>
 #include <string_view>
-
-#define SVR_MD5_BUF_SZ (1024*1024)
+#include <vector>
 
 int rsFileChksum(rsComm_t* rsComm, fileChksumInp_t* fileChksumInp, char** chksumStr)
 {
@@ -189,15 +188,24 @@ int fileChksum(rsComm_t* rsComm,
         irods::log( PASS( ret ) );
         irods::getHasher( irods::MD5_NAME, hasher );
     }
+    
+    // get the buffer size from server configuration - default to 1 MiB
+    int svr_md5_buf_sz;
+    try {
+        svr_md5_buf_sz = irods::get_advanced_setting<const int>("checksum_read_buffer_size_in_megabytes") * 1024 * 1024;
+    } catch ( const irods::exception& e ) {
+        svr_md5_buf_sz = 1024*1024;
+    }
 
     // =-=-=-=-=-=-=-
     // do an initial read of the file
-    char buffer[SVR_MD5_BUF_SZ];
+    std::vector<char> buffer(svr_md5_buf_sz);
+
     irods::error read_err = fileRead(
                                 rsComm,
                                 file_obj,
-                                buffer,
-                                SVR_MD5_BUF_SZ );
+                                buffer.data(),
+                                buffer.size());
     if (!read_err.ok()) {
         std::stringstream msg;
         msg << __FUNCTION__;
@@ -213,7 +221,7 @@ int fileChksum(rsComm_t* rsComm,
     // RTS - Issue #3275
     if ( bytes_read == 0 ) {
         std::string buffer_read;
-        buffer_read.resize( SVR_MD5_BUF_SZ );
+        buffer_read.resize( svr_md5_buf_sz );
     }
 
     // =-=-=-=-=-=-=-
@@ -221,11 +229,11 @@ int fileChksum(rsComm_t* rsComm,
     while ( read_err.ok() && bytes_read > 0 ) {
         // =-=-=-=-=-=-=-
         // update hasher
-        hasher.update( std::string( buffer, bytes_read ) );
+        hasher.update( std::string( buffer.data(), bytes_read ) );
 
         // =-=-=-=-=-=-=-
         // read some more
-        read_err = fileRead( rsComm, file_obj, buffer, SVR_MD5_BUF_SZ );
+        read_err = fileRead( rsComm, file_obj, buffer.data(), buffer.size());
         if ( read_err.ok() ) {
             bytes_read = read_err.code();
         }
@@ -339,11 +347,19 @@ int file_checksum(RsComm* _comm,
         }
     }};
 
-    char buffer[SVR_MD5_BUF_SZ];
+    // get the buffer size from server configuration - default to 1 MiB
+    int svr_md5_buf_sz;
+    try {
+        svr_md5_buf_sz = irods::get_advanced_setting<const int>("checksum_read_buffer_size_in_megabytes") * 1024 * 1024;
+    } catch ( const irods::exception& e ) {
+        svr_md5_buf_sz = 1024*1024;
+    }
+
+    std::vector<char> buffer(svr_md5_buf_sz);
     irods::error error = SUCCESS();
 
     while (_data_size > 0) {
-        error = fileRead(_comm, file_ptr, buffer, std::min<std::int64_t>(_data_size, sizeof(buffer)));
+        error = fileRead(_comm, file_ptr, buffer.data(), std::min<std::int64_t>(_data_size, buffer.size()));
 
         if (error.code() <= 0) {
             const auto msg = fmt::format("{} - fileRead failed for [{}].", __func__, _filename);
@@ -359,7 +375,7 @@ int file_checksum(RsComm* _comm,
         }
 
         _data_size -= error.code();
-        hasher.update(std::string(buffer, error.code()));
+        hasher.update(std::string(buffer.data(), error.code()));
     }
 
     // extract the digest from the hasher object
