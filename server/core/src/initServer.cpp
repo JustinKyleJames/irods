@@ -33,6 +33,7 @@
 #include "irods/irods_server_properties.hpp"
 #include "irods/irods_threads.hpp"
 #include "irods/key_value_proxy.hpp"
+#include "irods/replica_access_table.hpp"
 #include "irods/replica_state_table.hpp"
 #include "irods/irods_logger.hpp"
 
@@ -847,6 +848,27 @@ void close_all_l1_descriptors(RsComm& _comm)
 
             // TODO: need to unlock read-locked replicas
             if (OPEN_FOR_READ_TYPE != fd_cache.openType) {
+                // A client may write a replica over several connections, each served by its own
+                // agent (e.g. iput and the Python iRODS client). Only the last of those agents to
+                // exit finalizes the replica, so that the size recorded is the size after every
+                // agent has stopped writing. Each agent removes itself before checking, so the
+                // last one always finds no other agent.
+                if (!fd_cache.replica_token.empty()) {
+                    namespace rat = irods::experimental::replica_access_table;
+
+                    rat::erase_pid(fd_cache.replica_token, getpid());
+
+                    if (rat::contains(replica.data_id(), replica.replica_number())) {
+                        log_agent::debug("[{}:{}] Other agents still have the replica open. Leaving it for "
+                                         "them to finalize. [path={}, replica_number={}]",
+                                         __func__,
+                                         __LINE__,
+                                         replica.logical_path(),
+                                         replica.replica_number());
+                        continue;
+                    }
+                }
+
                 finalize_replica_opened_for_create_or_write(_comm, *replica.get(), fd_cache);
             }
         }

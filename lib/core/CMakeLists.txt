@@ -101,6 +101,7 @@ set(
   "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/obf.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/objInfo.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/packStruct.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/parallel_put.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/parallel_transfer_engine.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/parseCommandLine.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/phymvUtil.h"
@@ -148,6 +149,7 @@ set(
   "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/system_error.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/termiosUtil.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/thread_pool.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/transfer_layout.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/trimUtil.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/version.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/with_durability.hpp"
@@ -209,6 +211,7 @@ set(
   "${CMAKE_CURRENT_SOURCE_DIR}/src/rodsPath.cpp" # #includes headers from other places
   "${CMAKE_CURRENT_SOURCE_DIR}/src/stringOpr.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/system_error.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/transfer_layout.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/version.cpp"
 )
 
@@ -416,6 +419,7 @@ set(
   "${CMAKE_CURRENT_SOURCE_DIR}/src/miscUtil.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/mkdirUtil.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/mvUtil.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/parallel_put.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/phymvUtil.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/procApiRequest.cpp" # relies on RODS_SERVER/CLERVER
   "${CMAKE_CURRENT_SOURCE_DIR}/src/putUtil.cpp"

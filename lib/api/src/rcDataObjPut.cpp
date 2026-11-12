@@ -6,6 +6,7 @@
 #include "irods/sockComm.h"
 #include "irods/rcMisc.h"
 #include "irods/irods_client_server_negotiation.hpp"
+#include "irods/transfer_layout.hpp"
 
 #include <cstring>
 
@@ -123,6 +124,18 @@ rcDataObjPut( rcComm_t *conn, dataObjInp_t *dataObjInp, char *locFilePath ) {
                      "rcDataObjPut: fileBBufWithFile error for %s", locFilePath );
             return status;
         }
+    }
+
+    // A single buffer put is one part. Tell the server so that resource plugins do not have to
+    // guess how the data is split (see irods/transfer_layout.hpp). Servers that do not support
+    // transfer layouts ignore the keyword. The parallel transfer below does not send a layout, so
+    // make sure one left in the input by an earlier put is not sent with it.
+    if ( getValByKey( &dataObjInp->condInput, DATA_INCLUDED_KW ) != NULL ) {
+        const auto layout = irods::transfer_layout::make_layout( dataObjInp->dataSize, 1 ).dump();
+        addKeyVal( &dataObjInp->condInput, TRANSFER_LAYOUT_KW, layout.c_str() );
+    }
+    else {
+        rmKeyVal( &dataObjInp->condInput, TRANSFER_LAYOUT_KW );
     }
 
     dataObjInp->oprType = PUT_OPR;

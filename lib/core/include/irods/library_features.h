@@ -180,6 +180,14 @@
 /// \since 5.1.0
 #define IRODS_LIBRARY_FEATURE_RESOURCE_ADMINISTRATION                     202606L
 
+/// Defined if the development library supports client-provided transfer layouts for parallel puts.
+///
+/// When defined, the L1 descriptor has a transfer_layout member and get_file_descriptor_info
+/// returns it as "transfer_layout". See irods/transfer_layout.hpp.
+///
+/// \since 5.1.90
+#define IRODS_LIBRARY_FEATURE_TRANSFER_LAYOUT                             202610L
+
 // NOLINTEND
 
 #endif // IRODS_LIBRARY_FEATURES_H
