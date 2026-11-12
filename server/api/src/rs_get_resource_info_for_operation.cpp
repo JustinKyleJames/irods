@@ -6,6 +6,7 @@
 #include "irods/irods_logger.hpp"
 #include "irods/irods_resource_backport.hpp"
 #include "irods/irods_resource_redirect.hpp"
+#include "irods/objDesc.hpp"
 #include "irods/rcMisc.h"
 #include "irods/rodsConnect.h"
 #include "irods/rodsError.h"
@@ -88,6 +89,23 @@ int rs_get_resource_info_for_operation(RsComm* _comm, DataObjInp* _dataObjInp, c
     nlohmann::json resc_info;
     resc_info["host"] = location;
     resc_info["resource_hierarchy"] = hier;
+
+    // The same number of threads a put or get to or from this hierarchy would use.
+    if (PUT_OPR == _dataObjInp->oprType || GET_OPR == _dataObjInp->oprType) {
+        const int number_of_threads = getNumThreads(_comm,
+                                                    _dataObjInp->dataSize,
+                                                    _dataObjInp->numThreads,
+                                                    &_dataObjInp->condInput,
+                                                    hier.data(),
+                                                    nullptr,
+                                                    _dataObjInp->oprType);
+        if (number_of_threads < 0) {
+            log_api::error("{}: getNumThreads returned error: [{}]", __func__, number_of_threads);
+            return number_of_threads;
+        }
+        resc_info["number_of_threads"] = number_of_threads;
+    }
+
     *_out_info = strdup(resc_info.dump().c_str());
     return 0;
 } // rs_get_resource_info_for_operation

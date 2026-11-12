@@ -230,7 +230,8 @@ namespace
 #pragma GCC diagnostic pop
             {"remote_zone_host", to_json(_fd_info.remoteZoneHost)},
             {"in_pdmo", _fd_info.in_pdmo},
-            {"replica_token", _fd_info.replica_token}
+            {"replica_token", _fd_info.replica_token},
+            {"transfer_layout", _fd_info.transfer_layout.empty() ? json{} : json::parse(_fd_info.transfer_layout)}
         };
         // clang-format on
     }

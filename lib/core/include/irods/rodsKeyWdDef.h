@@ -111,6 +111,7 @@
 * after the operation */
 #define EMPTY_BUNDLE_ONLY_KW                        "emptyBundleOnly" /* delete emptyBundleOnly */ // JMC - backport 4552
 #define REPLICA_TOKEN_KW                            "replicaToken"
+#define TRANSFER_LAYOUT_KW                          "transferLayout" /* client sends a transfer layout on each portal connection (see irods/transfer_layout.hpp) */
 
 #define REGISTER_AS_INTERMEDIATE_KW                 "registerAsIntermediate"
 #define STALE_ALL_INTERMEDIATE_REPLICAS_KW          "staleAllIntermediateReplicas"

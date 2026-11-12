@@ -70,6 +70,7 @@
 #include "irods/replica_access_table.hpp"
 #include "irods/replica_state_table.hpp"
 #include "irods/scoped_privileged_client.hpp"
+#include "irods/transfer_layout.hpp"
 
 #define IRODS_FILESYSTEM_ENABLE_SERVER_SIDE_API
 #include "irods/filesystem.hpp"
@@ -83,9 +84,12 @@
 #include "irods/logical_locking.hpp"
 
 #include <fmt/format.h>
+#include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <stdexcept>
+#include <string>
 
 #include <sys/types.h>
 #include <unistd.h>
@@ -106,6 +110,45 @@ namespace
     // clang-format on
 
     constexpr auto minimum_valid_file_descriptor = 3;
+
+    // Checks the transfer layout sent in TRANSFER_LAYOUT_KW (see irods/transfer_layout.hpp).
+    // The layout must agree with DATA_SIZE_KW (or the data size in the input) and NUM_THREADS_KW
+    // when the client sent them.
+    auto validate_transfer_layout(DataObjInp& _inp, const char* _layout) -> int
+    {
+        if ((_inp.openFlags & O_ACCMODE) == O_RDONLY) {
+            log_api::error("{}: A transfer layout requires opening [{}] for writing.", __func__, _inp.objPath);
+            return USER_INCOMPATIBLE_PARAMS;
+        }
+
+        try {
+            const auto layout = nlohmann::json::parse(_layout);
+
+            auto size = layout.at("size").get<std::int64_t>();
+            if (const char* data_size = getValByKey(&_inp.condInput, DATA_SIZE_KW); data_size) {
+                size = std::stoll(data_size);
+            }
+            else if (_inp.dataSize > 0) {
+                size = _inp.dataSize;
+            }
+
+            auto number_of_parts = static_cast<int>(layout.at("parts").size());
+            if (const char* number_of_threads = getValByKey(&_inp.condInput, NUM_THREADS_KW); number_of_threads) {
+                number_of_parts = std::stoi(number_of_threads);
+            }
+
+            if (const auto ec = irods::transfer_layout::validate_layout(layout, size, number_of_parts); ec < 0) {
+                log_api::error("{}: Invalid transfer layout for [{}].", __func__, _inp.objPath);
+                return ec;
+            }
+        }
+        catch (const std::exception& e) {
+            log_api::error("{}: Invalid transfer layout for [{}]: {}", __func__, _inp.objPath, e.what());
+            return SYS_INVALID_INPUT_PARAM;
+        }
+
+        return 0;
+    } // validate_transfer_layout
 
     // Instructs how "update_replica_access_table" should update the
     // replica access table.
@@ -1370,6 +1413,13 @@ int rsDataObjOpen(rsComm_t *rsComm, dataObjInp_t *dataObjInp)
 
     if ((dataObjInp->openFlags & O_ACCMODE) == O_RDONLY && (dataObjInp->openFlags & O_TRUNC)) {
         return USER_INCOMPATIBLE_OPEN_FLAGS;
+    }
+
+    // Reject a bad transfer layout before anything is opened.
+    if (const char* layout = getValByKey(&dataObjInp->condInput, TRANSFER_LAYOUT_KW); layout && *layout) {
+        if (const auto ec = validate_transfer_layout(*dataObjInp, layout); ec < 0) {
+            return ec;
+        }
     }
 
     lq::violation check_quota_flags = lq::violation::none;

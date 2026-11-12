@@ -61,6 +61,7 @@ auto init_l1desc(l1desc& _l1d) -> void
     _l1d.remoteZoneHost = nullptr;
 
     _l1d.replica_token.clear();
+    _l1d.transfer_layout.clear();
 
     // NOLINTBEGIN(cppcoreguidelines-pro-bounds-array-to-pointer-decay)
     std::memset(_l1d.chksum, 0, sizeof(l1desc::chksum));
@@ -128,6 +129,7 @@ auto copy_l1desc(l1desc& _dst, const l1desc& _src) -> void
 
     _dst.remoteZoneHost = _src.remoteZoneHost;
     _dst.replica_token = _src.replica_token;
+    _dst.transfer_layout = _src.transfer_layout;
 
     // NOLINTBEGIN(cppcoreguidelines-pro-bounds-array-to-pointer-decay)
     std::memcpy(_dst.chksum, _src.chksum, sizeof(l1desc::chksum));
@@ -741,6 +743,12 @@ namespace irods
 
         if (cond_input.contains(KEY_VALUE_PASSTHROUGH_KW)) {
             duplicate_replica.cond_input()[KEY_VALUE_PASSTHROUGH_KW] = cond_input.at(KEY_VALUE_PASSTHROUGH_KW);
+        }
+
+        // Keep the transfer layout so that resource plugins can use it (see irods/transfer_layout.hpp).
+        // rsDataObjOpen has already validated it.
+        if ((_inp.openFlags & O_ACCMODE) != O_RDONLY && cond_input.contains(TRANSFER_LAYOUT_KW)) {
+            l1desc.transfer_layout = cond_input.at(TRANSFER_LAYOUT_KW).value();
         }
 
         return l1_index;

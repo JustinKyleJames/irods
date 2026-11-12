@@ -27,6 +27,11 @@ extern "C" {
 ///                        appropriate replica.
 ///     - \p RESC_HIER_STR_KW: Resource hierarchy hint. Given a hierarchy string, specifies the desired replica.
 ///     - \p REPL_NUM_KW: Replica number hint. Given a replica number, specifies the desired replica.
+/// - \p oprType: Set to \p PUT_OPR or \p GET_OPR to also get the number of threads the server would use to transfer
+///   the data object in that direction (since 5.1.90). The number of threads depends on the following members.
+/// - \p dataSize: The size of the data object in bytes. Used with \p oprType.
+/// - \p numThreads: The number of threads requested by the client. Used with \p oprType. 0 lets the server decide,
+///   and \p NO_THREADING requests a single stream.
 /// \endparblock
 /// \param[out] _out_info \parblock a JSON string with keys \p "host" and \p "resource_hierarchy", identifying target
 ///                       server and supplying a resource hierarchy string denoting a specific data object replica for
@@ -36,9 +41,16 @@ extern "C" {
 /// \code{.js}
 /// {
 ///     "host": string,
-///     "resource_hierarchy": string
+///     "resource_hierarchy": string,
+///
+///     // Only included when oprType is PUT_OPR or GET_OPR (since 5.1.90). The number of threads
+///     // the server would use for a put or get of dataSize bytes to or from resource_hierarchy.
+///     // 0 means a single stream.
+///     "number_of_threads": integer
 /// }
 /// \endcode
+///
+/// Servers older than 5.1.90 never include \p "number_of_threads".
 /// \endparblock
 ///
 /// \b Example

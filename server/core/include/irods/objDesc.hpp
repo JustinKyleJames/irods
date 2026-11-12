@@ -74,6 +74,10 @@ struct l1desc
     char in_pdmo[MAX_NAME_LEN];
 
     std::string replica_token;
+
+    // The transfer layout sent by the client (JSON text, see irods/transfer_layout.hpp).
+    // Empty if the client did not send one.
+    std::string transfer_layout;
 };
 
 using l1desc_t = l1desc;

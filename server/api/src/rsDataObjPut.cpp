@@ -426,6 +426,9 @@ namespace
             // not in the client.
             rmKeyVal(&_inp.condInput, DEST_RESC_NAME_KW);
 
+            // The layout describes the put, not the replication.
+            rmKeyVal(&_inp.condInput, TRANSFER_LAYOUT_KW);
+
             status = rsDataObjRepl(&_comm, &_inp, &transStat);
             if (transStat) {
                 free(transStat);

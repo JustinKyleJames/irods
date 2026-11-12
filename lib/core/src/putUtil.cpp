@@ -21,11 +21,223 @@
 #include "irods/irods_log.hpp"
 #include "irods/sockComm.h"
 
+#include "irods/escape_utilities.hpp"
+#include "irods/genQuery.h"
+#include "irods/get_resource_info_for_operation.h"
+#include "irods/getRodsEnv.h"
+#include "irods/objStat.h"
+#include "irods/parallel_put.hpp"
+#include "irods/version.hpp"
+
 #include <boost/filesystem/operations.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/filesystem/convenience.hpp>
 
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <cstdlib>
 #include <cstring>
+#include <optional>
+#include <string_view>
+
+namespace
+{
+    // Servers support rc_get_resource_info_for_operation starting with 4.3.1. Checking first avoids
+    // an error in older servers' logs.
+    auto server_supports_resource_info(const rcComm_t& _conn) -> bool
+    {
+        if (!_conn.svrVersion) {
+            return false;
+        }
+
+        const auto version = irods::to_version(_conn.svrVersion->relVersion);
+        return version && *version >= irods::version{4, 3, 1};
+    } // server_supports_resource_info
+
+    // The number of threads the server's default policy would use (acSetNumThreads calling
+    // msiSetNumThreads with default arguments). Used when the server does not report one, which
+    // servers older than 5.1.90 do not.
+    auto default_number_of_threads(const dataObjInp_t& _inp, const rodsEnv& _env) -> int
+    {
+        if (_inp.numThreads == NO_THREADING) {
+            return 1;
+        }
+
+        const auto bytes_per_thread = std::max<rodsLong_t>(_env.irodsTransBufferSizeForParaTrans, 1) * 1024 * 1024;
+        auto number_of_threads = _inp.dataSize / bytes_per_thread + 1;
+        if (_inp.numThreads > 0) {
+            number_of_threads = std::min<rodsLong_t>(number_of_threads, _inp.numThreads);
+        }
+
+        return static_cast<int>(std::min<rodsLong_t>(number_of_threads, MAX_NUM_CONFIG_TRAN_THR));
+    } // default_number_of_threads
+
+    // Returns 1 if the data object has a replica in the root resource _resource, 0 if not, or an
+    // error.
+    auto has_replica_in_resource(rcComm_t& _conn, const char* _logical_path, std::string_view _resource) -> int
+    {
+        char collection[MAX_NAME_LEN]{};
+        char data_name[MAX_NAME_LEN]{};
+        if (const auto ec = splitPathByKey(_logical_path, collection, MAX_NAME_LEN, data_name, MAX_NAME_LEN, '/');
+            ec < 0)
+        {
+            return ec;
+        }
+
+        genQueryInp_t query{};
+        const auto clear_query = irods::at_scope_exit{[&query] { clearGenQueryInp(&query); }};
+
+        addInxIval(&query.selectInp, COL_D_RESC_HIER, 1);
+        addInxVal(&query.sqlCondInp, COL_COLL_NAME, ("='" + irods::single_quotes_to_hex(collection) + "'").c_str());
+        addInxVal(&query.sqlCondInp, COL_DATA_NAME, ("='" + irods::single_quotes_to_hex(data_name) + "'").c_str());
+        query.maxRows = MAX_SQL_ROWS;
+
+        // The data object may be in another zone.
+        if (const std::string_view path = _logical_path; path.size() > 1) {
+            const auto zone = std::string{path.substr(1, path.find('/', 1) - 1)};
+            addKeyVal(&query.condInput, ZONE_KW, zone.c_str());
+        }
+
+        int found = 0;
+        while (true) {
+            genQueryOut_t* output{};
+            const auto free_output = irods::at_scope_exit{[&output] { freeGenQueryOut(&output); }};
+
+            if (const auto ec = rcGenQuery(&_conn, &query, &output); ec < 0) {
+                return ec == CAT_NO_ROWS_FOUND ? found : ec;
+            }
+
+            const auto* hierarchies = getSqlResultByInx(output, COL_D_RESC_HIER);
+            if (!hierarchies) {
+                return SYS_INTERNAL_ERR;
+            }
+
+            for (int i = 0; i < output->rowCnt; ++i) {
+                const std::string_view hierarchy = &hierarchies->value[i * hierarchies->len];
+                if (hierarchy.substr(0, hierarchy.find(';')) == _resource) {
+                    found = 1;
+                }
+            }
+
+            if (output->continueInx <= 0) {
+                return found;
+            }
+            query.continueInx = output->continueInx;
+        }
+    } // has_replica_in_resource
+
+    // The checks the server makes before a put transfers any data (see rsDataObjPut). The replica
+    // is opened instead, which does not make them, so the client does.
+    auto check_overwrite(rcComm_t& _conn, const dataObjInp_t& _inp) -> int
+    {
+        dataObjInp_t stat_inp{};
+        std::strncpy(stat_inp.objPath, _inp.objPath, MAX_NAME_LEN - 1);
+
+        rodsObjStat_t* stat_out{};
+        const auto free_stat_out = irods::at_scope_exit{[&stat_out] { freeRodsObjStat(stat_out); }};
+
+        // Errors other than "does not exist" are reported by the open.
+        if (rcObjStat(&_conn, &stat_inp, &stat_out) < 0 || !stat_out) {
+            return 0;
+        }
+
+        if (!getValByKey(&_inp.condInput, FORCE_FLAG_KW)) {
+            return OVERWRITE_WITHOUT_FORCE_FLAG;
+        }
+
+        // A forced put may not create a replica on a resource that does not already hold one.
+        const char* resource = getValByKey(&_inp.condInput, DEST_RESC_NAME_KW);
+        if (!resource || stat_out->objType != DATA_OBJ_T) {
+            return 0;
+        }
+
+        const auto found = has_replica_in_resource(_conn, _inp.objPath, resource);
+        if (found < 0) {
+            return found;
+        }
+        if (found == 0) {
+            rodsLog(LOG_ERROR, "cannot force put [%s] to a different resource [%s]", _inp.objPath, resource);
+            return HIERARCHY_ERROR;
+        }
+
+        return 0;
+    } // check_overwrite
+
+    // Uploads the file over several connections, each passing the transfer layout to the server
+    // (see irods/parallel_put.hpp). Returns std::nullopt if the old put (rcDataObjPut) should be
+    // used instead: for files sent in a single buffer, for options that rely on the old put
+    // (restart and reconnect), and for servers that do not support rc_get_resource_info_for_operation.
+    //
+    // Servers from 5.1.90 report the number of threads. For older servers, the number of threads
+    // the server's default policy would use is computed here.
+    auto put_with_transfer_layout(rcComm_t& _conn,
+                                  const rodsArguments_t& _args,
+                                  const dataObjInp_t& _inp,
+                                  const char* _local_path) -> std::optional<int>
+    {
+        if (_args.restart == True || _args.lfrestart == True || _args.reconnect == True) {
+            return std::nullopt;
+        }
+
+        rodsEnv env{};
+        if (const auto ec = getRodsEnv(&env); ec < 0) {
+            return ec;
+        }
+
+        if (_inp.dataSize <= static_cast<rodsLong_t>(env.irodsMaxSizeForSingleBuffer) * 1024 * 1024) {
+            return std::nullopt;
+        }
+
+        if (!server_supports_resource_info(_conn)) {
+            return std::nullopt;
+        }
+
+        if (const auto ec = check_overwrite(_conn, _inp); ec < 0) {
+            return ec;
+        }
+
+        dataObjInp_t info_inp{};
+        const auto clear_info_inp = irods::at_scope_exit{[&info_inp] { clearKeyVal(&info_inp.condInput); }};
+        replDataObjInp(const_cast<dataObjInp_t*>(&_inp), &info_inp); // NOLINT(cppcoreguidelines-pro-type-const-cast)
+
+        // A layout left by an earlier single buffer put does not describe this upload.
+        rmKeyVal(&info_inp.condInput, TRANSFER_LAYOUT_KW);
+        addKeyVal(&info_inp.condInput, GET_RESOURCE_INFO_OP_TYPE_KW, "CREATE");
+        info_inp.oprType = PUT_OPR;
+
+        char* info{};
+        const auto free_info = irods::at_scope_exit{[&info] { std::free(info); }}; // NOLINT(cppcoreguidelines-no-malloc)
+
+        if (const auto ec = rc_get_resource_info_for_operation(&_conn, &info_inp, &info); ec != 0) {
+            if (ec == SYS_UNMATCHED_API_NUM) {
+                return std::nullopt;
+            }
+            return ec;
+        }
+
+        std::string host;
+        std::string hierarchy;
+        int number_of_threads = 0;
+
+        try {
+            const auto json = nlohmann::json::parse(info);
+            host = json.at("host").get<std::string>();
+            hierarchy = json.at("resource_hierarchy").get<std::string>();
+
+            // 0 means the server would use a single stream.
+            number_of_threads = json.contains("number_of_threads")
+                                    ? std::max(json.at("number_of_threads").get<int>(), 1)
+                                    : default_number_of_threads(_inp, env);
+        }
+        catch (const nlohmann::json::exception& e) {
+            rodsLog(LOG_ERROR, "putUtil: invalid resource information from server: %s", e.what());
+            return SYS_INTERNAL_ERR;
+        }
+
+        return irods::parallel_put(_conn, _inp, _local_path, host, hierarchy, number_of_threads);
+    } // put_with_transfer_layout
+} // anonymous namespace
 
 /* checkStateForResume - check the state for resume operation
  * return 0 - skip
@@ -440,7 +652,12 @@ putFileUtil( rcComm_t *conn, char *srcPath, char *targPath, rodsLong_t srcSize,
     }
     rstrcpy( dataObjOprInp->objPath, targPath, MAX_NAME_LEN );
     dataObjOprInp->dataSize = srcSize;
-    status = rcDataObjPut( conn, dataObjOprInp, srcPath );
+    if ( const auto ec = put_with_transfer_layout( *conn, *rodsArgs, *dataObjOprInp, srcPath ); ec ) {
+        status = *ec;
+    }
+    else {
+        status = rcDataObjPut( conn, dataObjOprInp, srcPath );
+    }
 
     if ( status >= 0 ) {
         if ( rodsArgs->verbose == True ) {
